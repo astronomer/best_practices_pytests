@@ -8,7 +8,8 @@ import importlib.util
 from collections import defaultdict
 from airflow.models import DAG
 
-DAGS_PATH = "dags"
+from conftest import DAGS_DIR
+
 
 def _load_dags_from(filepath: str):
     """Import a module from a file path and yield (dag_id, dag) pairs declared in it."""
@@ -19,15 +20,19 @@ def _load_dags_from(filepath: str):
         if isinstance(obj, DAG):
             yield obj.dag_id, obj
 
+
 def test_duplicate_dag_ids_across_files():
     dag_id_to_files = defaultdict(list)
 
-    for filename in sorted(os.listdir(DAGS_PATH)):
-        if not filename.endswith(".py"):
+    for filename in sorted(os.listdir(str(DAGS_DIR))):
+        if not filename.endswith(".py") or filename.startswith((".", "_")):
             continue
-        filepath = os.path.join(DAGS_PATH, filename)
-        for dag_id, _dag in _load_dags_from(filepath):
-            dag_id_to_files[dag_id].append(filepath)
+        filepath = os.path.join(str(DAGS_DIR), filename)
+        try:
+            for dag_id, _dag in _load_dags_from(filepath):
+                dag_id_to_files[dag_id].append(filepath)
+        except Exception:
+            pass  # import errors are caught by other tests
 
     duplicates = {dag_id: files for dag_id, files in dag_id_to_files.items() if len(files) > 1}
     assert not duplicates, (

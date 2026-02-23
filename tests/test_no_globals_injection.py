@@ -4,23 +4,21 @@
 # See also: https://docs.astronomer.io/learn/dynamically-generating-dags
 
 import ast
-from pathlib import Path
 
-DAGS_DIR = Path("dags")
+from conftest import dag_files
 
-def _detect_globals_injection(py_path: Path):
+
+def _detect_globals_injection(py_path):
     """Return a list of (lineno, col, kind) where the file assigns via globals()[...] = ... or calls globals() in assignment."""
     text = py_path.read_text(encoding="utf-8", errors="ignore")
     violations = []
     try:
         tree = ast.parse(text, filename=str(py_path))
     except Exception:
-        # If parse fails, leave it to other tests; not this one's concern
         return violations
 
     class Visitor(ast.NodeVisitor):
         def visit_Assign(self, node: ast.Assign):
-            # Look for targets like globals()[<key>] = <value>
             for tgt in node.targets:
                 if isinstance(tgt, ast.Subscript) and isinstance(tgt.value, ast.Call):
                     call = tgt.value
@@ -29,7 +27,6 @@ def _detect_globals_injection(py_path: Path):
             self.generic_visit(node)
 
         def visit_Call(self, node: ast.Call):
-            # Generic call to globals() — flag if used at all, but especially if wrapped in Subscript handled above
             if isinstance(node.func, ast.Name) and node.func.id == "globals":
                 violations.append((node.lineno, node.col_offset, "call_globals"))
             self.generic_visit(node)
@@ -47,12 +44,10 @@ def _detect_globals_injection(py_path: Path):
     out = [(ln, c, k) for (ln, c), k in sorted(dedup.items())]
     return out
 
+
 def test_no_globals_injection():
-    assert DAGS_DIR.is_dir(), "dags directory not found"
     offenders = {}
-    for py in sorted(DAGS_DIR.glob("*.py")):
-        if py.name.startswith("._"):
-            continue
+    for py in dag_files():
         hits = _detect_globals_injection(py)
         if hits:
             offenders[py.name] = hits

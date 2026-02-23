@@ -1,15 +1,41 @@
-# Limit excessive tasks per DAG
-# This test ensures: Too many tasks in a single DAG can slow the scheduler and clutter the UI.
-# Reference: https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html#scaling-dags
+# Shared fixtures and helpers for Airflow best-practices tests
 
-import os
+import ast
+from pathlib import Path
 
-# Default hard cap, adjustable via env var for CI or projects with special needs
-TASK_COUNT_LIMIT = int(os.getenv("AIRFLOW_DAG_TASK_COUNT_LIMIT", "50"))
+import pytest
+from airflow.models import DagBag
 
-def test_task_count_limit(generated_dags):
-    offenders = [(dag_id, len(dag.tasks)) for dag_id, dag in generated_dags.items() if len(dag.tasks) > TASK_COUNT_LIMIT]
-    assert not offenders, (
-        f"Too many tasks in a single DAG (limit={TASK_COUNT_LIMIT}). Offenders:\n"
-        + "\n".join(f"  {dag_id}: {count} tasks" for dag_id, count in sorted(offenders, key=lambda x: x[1], reverse=True))
-    )
+# Resolve relative to this file so tests work from any working directory
+DAGS_DIR = (Path(__file__).parent.parent / "dags").resolve()
+
+
+def dag_files():
+    """Yield .py paths in DAGS_DIR, skipping __init__.py, dotfiles, and underscore-prefixed files."""
+    for py in sorted(DAGS_DIR.glob("*.py")):
+        if py.name.startswith((".", "_")):
+            continue
+        yield py
+
+
+def call_name(node: ast.Call) -> str:
+    """Return a best-effort dotted function name for an ast.Call node."""
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        parts = []
+        cur = node.func
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            parts.append(cur.id)
+        return ".".join(reversed(parts))
+    return ""
+
+
+@pytest.fixture(scope="session")
+def generated_dags():
+    """Load all DAGs via DagBag and return a {dag_id: dag} mapping."""
+    bag = DagBag(dag_folder=str(DAGS_DIR), include_examples=False)
+    return bag.dags
