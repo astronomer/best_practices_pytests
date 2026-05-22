@@ -2,7 +2,7 @@
 BAD PRACTICE: Nested Loops for Task Creation
 
 Problem:
-- Creates tasks using nested loops (O(n^2) pattern).
+- Creates too many static tasks using nested loops (O(n^2) pattern).
 
 Why It’s Bad:
 - Exponential increase in tasks for large datasets/configurations.
@@ -20,7 +20,7 @@ with DAG(
     schedule="@daily",
     catchup=False,
 ) as dag:
-    # BAD: Nested loops creating tasks
-    for i in range(2):
-        for j in range(2):
+    # BAD: Large nested loops creating static tasks at parse time
+    for i in range(10):
+        for j in range(10):
             EmptyOperator(task_id=f"task_{i}_{j}")

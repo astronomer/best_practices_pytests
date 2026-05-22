@@ -10,7 +10,14 @@ import textwrap
 import time
 import importlib.util
 
+import pytest
+
 from conftest import DAGS_DIR, dag_files
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("AIRFLOW_RUN_PARSE_PROFILING_TESTS") != "1",
+    reason="DAG parse profiling executes DAG files; set AIRFLOW_RUN_PARSE_PROFILING_TESTS=1 to run it",
+)
 
 # Per-statement threshold in seconds
 DEFAULT_STATEMENT_LIMIT_S = float(

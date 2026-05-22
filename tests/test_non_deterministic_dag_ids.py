@@ -4,26 +4,49 @@
 
 import ast
 
-from conftest import DAGS_DIR, call_name, dag_files
+from conftest import call_name, dag_files
 
 # Calls that produce non-deterministic values
 _NONDETERMINISTIC_CALLS = {
-    "uuid.uuid1", "uuid.uuid3", "uuid.uuid4", "uuid.uuid5",
+    "uuid.uuid1", "uuid.uuid4",
     "random.random", "random.randint", "random.choice", "random.uniform",
     "random.sample", "random.randrange",
     "datetime.now", "datetime.utcnow", "datetime.datetime.now", "datetime.datetime.utcnow",
+    "datetime.date.today", "date.today",
+    "pendulum.now", "pendulum.today",
     "time.time", "time.time_ns",
 }
 
-# Module prefixes — any call starting with these is suspect
-_NONDETERMINISTIC_PREFIXES = ("uuid.", "random.")
+_NONDETERMINISTIC_PREFIXES = ("random.",)
 
 
-def _contains_nondeterministic_call(node):
+def _import_aliases(tree):
+    aliases = {}
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name.split(".")[0]] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return aliases
+
+
+def _resolve_alias(name: str, aliases: dict[str, str]) -> str:
+    if not name:
+        return name
+
+    first, *rest = name.split(".")
+    if first not in aliases:
+        return name
+    return ".".join([aliases[first], *rest])
+
+
+def _contains_nondeterministic_call(node, aliases):
     """Walk an AST subtree and return True if it contains a non-deterministic call."""
     for child in ast.walk(node):
         if isinstance(child, ast.Call):
-            name = call_name(child)
+            name = _resolve_alias(call_name(child), aliases)
             if name in _NONDETERMINISTIC_CALLS:
                 return True
             if any(name.startswith(p) for p in _NONDETERMINISTIC_PREFIXES):
@@ -37,6 +60,8 @@ def _find_dynamic_dag_id(py_path):
         tree = ast.parse(text, filename=str(py_path))
     except Exception:
         return []
+
+    aliases = _import_aliases(tree)
 
     # Build a map of variable name -> assignment value node for simple tracing
     var_assignments = {}
@@ -54,21 +79,21 @@ def _find_dynamic_dag_id(py_path):
 
         # Direct non-deterministic call: dag_id=uuid.uuid4()
         if isinstance(val, ast.Call):
-            name = call_name(val)
+            name = _resolve_alias(call_name(val), aliases)
             if name in _NONDETERMINISTIC_CALLS or any(name.startswith(p) for p in _NONDETERMINISTIC_PREFIXES):
                 violations.append((node.lineno, node.col_offset, f"dag_id from call {name}"))
             continue
 
         # f-string or concatenation — only flag if the subtree contains a bad call
         if isinstance(val, (ast.JoinedStr, ast.BinOp)):
-            if _contains_nondeterministic_call(val):
+            if _contains_nondeterministic_call(val, aliases):
                 violations.append((node.lineno, node.col_offset, "dag_id built with non-deterministic expression"))
             continue
 
         # Variable reference: dag_id=some_var — trace one level
         if isinstance(val, ast.Name) and val.id in var_assignments:
             assigned = var_assignments[val.id]
-            if _contains_nondeterministic_call(assigned):
+            if _contains_nondeterministic_call(assigned, aliases):
                 violations.append((node.lineno, node.col_offset, f"dag_id from variable '{val.id}' containing non-deterministic call"))
             continue
 

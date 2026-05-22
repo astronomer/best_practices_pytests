@@ -7,7 +7,14 @@ import sys
 import time
 import importlib.util
 
+import pytest
+
 from conftest import DAGS_DIR, dag_files
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("AIRFLOW_RUN_IMPORT_TIMING_TESTS") != "1",
+    reason="DAG import timing tests execute DAG files; set AIRFLOW_RUN_IMPORT_TIMING_TESTS=1 to run them",
+)
 
 # Default per-file budget in seconds; can be overridden for CI via env
 DEFAULT_LIMIT_S = float(os.getenv("AIRFLOW_DAG_IMPORT_TIME_LIMIT_S", "1.0"))

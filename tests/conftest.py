@@ -4,7 +4,6 @@ import ast
 from pathlib import Path
 
 import pytest
-from airflow.models import DagBag
 
 # Resolve relative to this file so tests work from any working directory
 DAGS_DIR = (Path(__file__).parent.parent / "dags").resolve()
@@ -37,5 +36,10 @@ def call_name(node: ast.Call) -> str:
 @pytest.fixture(scope="session")
 def generated_dags():
     """Load all DAGs via DagBag and return a {dag_id: dag} mapping."""
+    try:
+        from airflow.models import DagBag
+    except ModuleNotFoundError:
+        pytest.skip("Airflow is required for DagBag-based tests")
+
     bag = DagBag(dag_folder=str(DAGS_DIR), include_examples=False)
     return bag.dags
